@@ -19,9 +19,25 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""FFW_BG2 environments for fixed-arm robots."""
-
 import gymnasium as gym
-from .reach import *  # noqa
-from .pick_place import *  # noqa
-from .buckle_scene import *  # noqa
+
+from . import ik_rel_env_cfg, joint_pos_env_cfg
+
+
+gym.register(
+    id="RobotisLab-Buckle-Scene-FFW-BG2-Joint-Pos-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    kwargs={
+        "env_cfg_entry_point": joint_pos_env_cfg.BuckleSceneFFWBG2JointPosEnvCfg,
+    },
+    disable_env_checker=True,
+)
+
+gym.register(
+    id="RobotisLab-Buckle-Scene-FFW-BG2-IK-Rel-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    kwargs={
+        "env_cfg_entry_point": ik_rel_env_cfg.BuckleSceneFFWBG2EnvCfg,
+    },
+    disable_env_checker=True,
+)

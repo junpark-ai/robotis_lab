@@ -44,3 +44,5 @@ from .tooth_brush import *
 from .scissors_ring import *
 from .pliers_ring import *
 from .screw_driver_ring import *
+from .seatbelt_buckle_insert import *
+from .seatbelt_buckle_housing import *
