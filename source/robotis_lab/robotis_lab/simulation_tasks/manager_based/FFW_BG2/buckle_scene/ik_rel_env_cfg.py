@@ -23,7 +23,7 @@ from isaaclab.controllers.differential_ik_cfg import DifferentialIKControllerCfg
 from isaaclab.envs.mdp.actions.actions_cfg import DifferentialInverseKinematicsActionCfg
 from isaaclab.utils import configclass
 
-from robotis_lab.assets.robots.FFW_BG2 import FFW_BG2_WITHOUT_MIMIC_CFG  # isort: skip
+from robotis_lab.assets.robots.FFW_BG2 import FFW_BG2_CFG  # isort: skip
 
 from . import joint_pos_env_cfg
 
@@ -33,7 +33,9 @@ class BuckleSceneFFWBG2EnvCfg(joint_pos_env_cfg.BuckleSceneFFWBG2JointPosEnvCfg)
     def __post_init__(self):
         super().__post_init__()
 
-        self.scene.robot = FFW_BG2_WITHOUT_MIMIC_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+        self.scene.robot = FFW_BG2_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+        self.scene.robot.actuators["gripper_master"].effort_limit_sim = 2.0
+        self.scene.robot.actuators["gripper_slave"].effort_limit_sim = 2.0
 
         self.actions.arm_action = DifferentialInverseKinematicsActionCfg(
             asset_name="robot",

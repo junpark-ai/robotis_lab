@@ -15,7 +15,7 @@ SEATBELT_BUCKLE_INSERT_CFG = RigidObjectCfg(
             angular_damping=1.0,
             max_depenetration_velocity=5.0,
         ),
-        mass_props=sim_utils.MassPropertiesCfg(mass=0.05),
+        # mass_props=sim_utils.MassPropertiesCfg(mass=0.05),
         collision_props=sim_utils.CollisionPropertiesCfg(),
     ),
     init_state=RigidObjectCfg.InitialStateCfg(

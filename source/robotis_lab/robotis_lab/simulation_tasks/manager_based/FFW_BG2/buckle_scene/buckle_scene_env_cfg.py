@@ -30,9 +30,8 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import FrameTransformerCfg
-from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg, UsdFileCfg
+from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg
 from isaaclab.utils import configclass
-from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
 import isaaclab.envs.mdp as base_mdp
 from robotis_lab.assets.object import SEATBELT_BUCKLE_HOUSING_CFG, SEATBELT_BUCKLE_INSERT_CFG
@@ -46,24 +45,11 @@ class BuckleTableSceneCfg(InteractiveSceneCfg):
     robot: ArticulationCfg = MISSING
     ee_frame: FrameTransformerCfg = MISSING
 
-    table = AssetBaseCfg(
-        prim_path="/World/envs/env_.*/PackingTable",
-        init_state=AssetBaseCfg.InitialStateCfg(
-            pos=[0.70, -0.1, 0.0],
-            rot=[-0.70710678, 0.0, 0.0, 0.70710678],
-        ),
-        spawn=UsdFileCfg(
-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/PackingTable/packing_table.usd",
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
-            scale=(1.0, 1.0, 1.0),
-        ),
-    )
-
     insert = SEATBELT_BUCKLE_INSERT_CFG.replace(
         prim_path="{ENV_REGEX_NS}/Insert",
         spawn=SEATBELT_BUCKLE_INSERT_CFG.spawn.replace(
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                disable_gravity=False,
+                disable_gravity=True,
                 linear_damping=1.0,
                 angular_damping=1.0,
                 max_depenetration_velocity=5.0,
@@ -74,6 +60,15 @@ class BuckleTableSceneCfg(InteractiveSceneCfg):
 
     housing = SEATBELT_BUCKLE_HOUSING_CFG.replace(
         prim_path="{ENV_REGEX_NS}/Housing",
+        spawn=SEATBELT_BUCKLE_HOUSING_CFG.spawn.replace(
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                kinematic_enabled=False,
+                disable_gravity=False,
+                linear_damping=1.0,
+                angular_damping=1.0,
+                max_depenetration_velocity=5.0,
+            ),
+        ),
         init_state=RigidObjectCfg.InitialStateCfg(pos=[0.46, 0.14, 0.995], rot=BUCKLE_YAW_90_QUAT),
     )
 

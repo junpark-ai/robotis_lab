@@ -361,8 +361,23 @@ def process_success_condition(env: gym.Env, success_term: object | None, success
     return success_step_count, False
 
 
+def reset_teleop_state(teleop_interface: object | None) -> None:
+    """Reset the teleop device and apply task-specific defaults."""
+    if teleop_interface is None:
+        return
+
+    teleop_interface.reset()
+
+    if getattr(env_cfg, "teleop_default_close_gripper", False) and hasattr(teleop_interface, "_close_gripper"):
+        teleop_interface._close_gripper = True
+
+
 def handle_reset(
-    env: gym.Env, success_step_count: int, instruction_display: InstructionDisplay, label_text: str
+    env: gym.Env,
+    teleop_interface: object | None,
+    success_step_count: int,
+    instruction_display: InstructionDisplay,
+    label_text: str,
 ) -> int:
     """Handle resetting the environment.
 
@@ -382,6 +397,7 @@ def handle_reset(
     env.sim.reset()
     env.recorder_manager.reset()
     env.reset()
+    reset_teleop_state(teleop_interface)
     success_step_count = 0
     instruction_display.show_demo(label_text)
     return success_step_count
@@ -443,7 +459,7 @@ def run_simulation_loop(
     # Reset before starting
     env.sim.reset()
     env.reset()
-    teleop_interface.reset()
+    reset_teleop_state(teleop_interface)
 
     label_text = f"Recorded {current_recorded_demo_count} successful demonstrations."
     instruction_display = setup_ui(label_text, env)
@@ -495,7 +511,9 @@ def run_simulation_loop(
 
             # Handle reset if requested
             if should_reset_recording_instance:
-                success_step_count = handle_reset(env, success_step_count, instruction_display, label_text)
+                success_step_count = handle_reset(
+                    env, teleop_interface, success_step_count, instruction_display, label_text
+                )
                 should_reset_recording_instance = False
 
             # Check if simulation is stopped
