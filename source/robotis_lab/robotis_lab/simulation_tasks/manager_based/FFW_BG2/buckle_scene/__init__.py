@@ -21,7 +21,7 @@
 
 import gymnasium as gym
 
-from . import ik_rel_env_cfg, ik_rel_inference_env_cfg, joint_pos_env_cfg
+from . import ik_rel_env_cfg, joint_pos_env_cfg
 
 
 gym.register(
@@ -38,15 +38,6 @@ gym.register(
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     kwargs={
         "env_cfg_entry_point": ik_rel_env_cfg.BuckleSceneFFWBG2EnvCfg,
-    },
-    disable_env_checker=True,
-)
-
-gym.register(
-    id="RobotisLab-Buckle-Scene-FFW-BG2-IK-Rel-Inference-v0",
-    entry_point="isaaclab.envs:ManagerBasedRLEnv",
-    kwargs={
-        "env_cfg_entry_point": ik_rel_inference_env_cfg.BuckleSceneFFWBG2InferenceEnvCfg,
     },
     disable_env_checker=True,
 )
