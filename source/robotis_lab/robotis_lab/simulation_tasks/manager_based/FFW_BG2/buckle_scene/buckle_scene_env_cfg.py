@@ -29,7 +29,7 @@ from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
-from isaaclab.sensors import FrameTransformerCfg
+from isaaclab.sensors import CameraCfg, FrameTransformerCfg
 from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg
 from isaaclab.utils import configclass
 
@@ -44,6 +44,9 @@ BUCKLE_YAW_90_QUAT = [0.70710678, 0.0, 0.0, 0.70710678]
 class BuckleTableSceneCfg(InteractiveSceneCfg):
     robot: ArticulationCfg = MISSING
     ee_frame: FrameTransformerCfg = MISSING
+    left_wrist_cam: CameraCfg = MISSING
+    right_wrist_cam: CameraCfg = MISSING
+    head_cam: CameraCfg = MISSING
 
     insert = SEATBELT_BUCKLE_INSERT_CFG.replace(
         prim_path="{ENV_REGEX_NS}/Insert",
@@ -104,6 +107,19 @@ class ObservationsCfg:
         insert_rot = ObsTerm(func=base_mdp.root_quat_w, params={"asset_cfg": SceneEntityCfg("insert")})
         housing_pos = ObsTerm(func=base_mdp.root_pos_w, params={"asset_cfg": SceneEntityCfg("housing")})
         housing_rot = ObsTerm(func=base_mdp.root_quat_w, params={"asset_cfg": SceneEntityCfg("housing")})
+
+        left_wrist_cam = ObsTerm(
+            func=mdp.image,
+            params={"sensor_cfg": SceneEntityCfg("left_wrist_cam"), "data_type": "rgb", "normalize": False},
+        )
+        right_wrist_cam = ObsTerm(
+            func=mdp.image,
+            params={"sensor_cfg": SceneEntityCfg("right_wrist_cam"), "data_type": "rgb", "normalize": False},
+        )
+        head_cam = ObsTerm(
+            func=mdp.image,
+            params={"sensor_cfg": SceneEntityCfg("head_cam"), "data_type": "rgb", "normalize": False},
+        )
 
         def __post_init__(self):
             self.enable_corruption = False

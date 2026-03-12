@@ -19,9 +19,10 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+import isaaclab.sim as sim_utils
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
-from isaaclab.sensors import FrameTransformerCfg
+from isaaclab.sensors import CameraCfg, FrameTransformerCfg
 from isaaclab.sensors.frame_transformer.frame_transformer_cfg import OffsetCfg
 from isaaclab.utils import configclass
 
@@ -153,6 +154,46 @@ class BuckleSceneFFWBG2JointPosEnvCfg(BuckleSceneEnvCfg):
             close_command_expr={"gripper_r_joint1": 0.65},
         )
         self.actions.gripper_action.class_type = buckle_mdp.DefaultClosedBinaryJointPositionAction
+
+        self.scene.left_wrist_cam = CameraCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/ffw_bg2_follower/left_arm/arm_l_link7/camera_l_bottom_screw_frame/camera_l_link/left_wrist_cam",
+            update_period=0.0,
+            height=244,
+            width=244,
+            data_types=["rgb"],
+            spawn=sim_utils.PinholeCameraCfg(
+                focal_length=18.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 2)
+            ),
+            offset=CameraCfg.OffsetCfg(
+                pos=(-0.08, 0.0, 0.0), rot=(0.5, -0.5, -0.5, 0.5), convention="isaac"
+            ),
+        )
+        self.scene.right_wrist_cam = CameraCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/ffw_bg2_follower/right_arm/arm_r_link7/camera_r_bottom_screw_frame/camera_r_link/right_wrist_cam",
+            update_period=0.0,
+            height=244,
+            width=244,
+            data_types=["rgb"],
+            spawn=sim_utils.PinholeCameraCfg(
+                focal_length=18.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 2)
+            ),
+            offset=CameraCfg.OffsetCfg(
+                pos=(-0.08, 0.0, 0.0), rot=(0.5, -0.5, -0.5, 0.5), convention="isaac"
+            ),
+        )
+        self.scene.head_cam = CameraCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/ffw_bg2_follower/head/head_link2/head_cam",
+            update_period=0.0,
+            height=244,
+            width=244,
+            data_types=["rgb", "distance_to_image_plane"],
+            spawn=sim_utils.PinholeCameraCfg(
+                focal_length=12.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 2)
+            ),
+            offset=CameraCfg.OffsetCfg(
+                pos=(-0.03, 0.04, 0.0), rot=(0.5, 0.5, -0.5, -0.5), convention="isaac"
+            ),
+        )
 
         marker_cfg = FRAME_MARKER_CFG.copy()
         marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)

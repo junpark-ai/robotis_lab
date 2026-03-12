@@ -51,21 +51,42 @@ ROBOT_CONFIGS = {
         "cameras": {
             "cam_head": {"height": 376, "width": 672},
         }
+    },
+    "FFW_BG2_BUCKLE": {
+        "expected_dim": 7,
+        "joint_names": [
+            "arm_r_joint1", "arm_r_joint2", "arm_r_joint3", "arm_r_joint4",
+            "arm_r_joint5", "arm_r_joint6", "arm_r_joint7",
+        ],
+        "cameras": {
+            "left_wrist_cam": {"height": 244, "width": 244},
+            "right_wrist_cam": {"height": 244, "width": 244},
+            "head_cam": {"height": 244, "width": 244},
     }
 }
+}
 
-def get_env_features(fps: int, robot_type: str):
+EE_REL_NAMES = ["dx", "dy", "dz", "droll", "dpitch", "dyaw", "gripper"]
+
+def get_env_features(fps: int, robot_type: str, action_type: str = "joint_pos"):
     if robot_type not in ROBOT_CONFIGS:
         raise ValueError(f"Unsupported robot type: {robot_type}")
-    
+
     config = ROBOT_CONFIGS[robot_type]
-    
+
+    if action_type == "ee_rel":
+        action_names = EE_REL_NAMES
+        action_dim = len(action_names)
+    else:
+        action_names = config["joint_names"]
+        action_dim = config["expected_dim"]
+
     # Build action and observation.state features
     features = {
         "action": {
             "dtype": "float32",
-            "shape": (config["expected_dim"],),
-            "names": config["joint_names"],
+            "shape": (action_dim,),
+            "names": action_names,
         },
         "observation.state": {
             "dtype": "float32",
@@ -94,65 +115,77 @@ def get_env_features(fps: int, robot_type: str):
     
     return features
 
-def process_data(dataset: LeRobotDataset, task: str, demo_group: h5py.Group, demo_name: str, frame_skip: int, robot_type: str) -> bool:
+def process_data(dataset: LeRobotDataset, task: str, demo_group: h5py.Group, demo_name: str, frame_skip: int, robot_type: str, action_type: str = "joint_pos", reverse: bool = False) -> bool:
     """
     Process a single demonstration group from the HDF5 dataset
     and add it into the LeRobot dataset.
     """
     if robot_type not in ROBOT_CONFIGS:
         raise ValueError(f"Unsupported robot type: {robot_type}")
-    
+
     config = ROBOT_CONFIGS[robot_type]
     camera_keys = list(config["cameras"].keys())
-    
+
     try:
-        # Load action and joint position data
-        actions = np.array(demo_group['actions'], dtype=np.float32)
         joint_pos = np.array(demo_group['obs/joint_pos'], dtype=np.float32)
-        
+        if action_type == "ee_rel":
+            actions = np.array(demo_group['actions'], dtype=np.float32)
+
         # Load camera images based on robot type
         camera_data = {}
         for cam_key in camera_keys:
             camera_data[cam_key] = np.array(demo_group[f'obs/{cam_key}'], dtype=np.uint8)
-            
+
     except KeyError as e:
         print(f"Demo {demo_name} is not valid (missing key: {e}), skipping...")
         return False
 
-    if actions.shape[0] < 10:
-        print(f"Demo {demo_name} has insufficient frames ({actions.shape[0]}), skipping...")
-        return False
+    # Reverse the temporal order of all data if requested
+    if reverse:
+        joint_pos = joint_pos[::-1]
+        if action_type == "ee_rel":
+            actions = -actions[::-1]
+        for cam_key in camera_keys:
+            camera_data[cam_key] = camera_data[cam_key][::-1]
 
-    # Ensure actions and joint positions are 2D arrays
-    if actions.ndim == 1:
-        actions = actions.reshape(-1, config["expected_dim"])
+    # Ensure joint positions are 2D arrays
     if joint_pos.ndim == 1:
         joint_pos = joint_pos.reshape(-1, config["expected_dim"])
-    
-    total_state_frames = actions.shape[0]
+
+    if joint_pos.shape[0] < 10:
+        print(f"Demo {demo_name} has insufficient frames ({joint_pos.shape[0]}), skipping...")
+        return False
+
+    total_state_frames = joint_pos.shape[0]
 
     # Process each frame
     for frame_index in tqdm(range(total_state_frames), desc=f"Processing demo {demo_name}"):
         if frame_index < frame_skip:
             continue
-        
+
         # Build frame dictionary
+        if action_type == "joint_pos":
+            action = joint_pos[frame_index]
+        else:
+            action = actions[frame_index]
+
         frame = {
-            "action": actions[frame_index],
+            "action": action,
             "observation.state": joint_pos[frame_index],
         }
-        
+
         # Add camera images
         for cam_key in camera_keys:
             frame[f"observation.images.{cam_key}"] = camera_data[cam_key][frame_index]
-        
+
         dataset.add_frame(frame=frame, task=task)
 
     return True
 
 def convert_isaaclab_to_lerobot(
     task: str, repo_id: str, robot_type: str, dataset_file: str,
-    fps: int, push_to_hub: bool = False, frame_skip: int = 3, root: str = "./datasets/lerobot/sim2real_data"
+    fps: int, push_to_hub: bool = False, frame_skip: int = 3, root: str = "./datasets/lerobot/sim2real_data",
+    action_type: str = "joint_pos", reverse: bool = False,
 ):
     """
     Convert an IsaacLab HDF5 dataset into LeRobot dataset format.
@@ -165,7 +198,7 @@ def convert_isaaclab_to_lerobot(
         repo_id=repo_id,
         fps=fps,
         robot_type=robot_type,
-        features=get_env_features(fps, robot_type),
+        features=get_env_features(fps, robot_type, action_type),
         root=root,
     )
 
@@ -184,7 +217,7 @@ def convert_isaaclab_to_lerobot(
                     print(f"Demo {demo_name} not successful, skipping...")
                     continue
 
-                valid = process_data(dataset, task, demo_group, demo_name, frame_skip, robot_type)
+                valid = process_data(dataset, task, demo_group, demo_name, frame_skip, robot_type, action_type, reverse)
 
                 if valid:
                     now_episode_index += 1
@@ -204,6 +237,9 @@ if __name__ == "__main__":
     parser.add_argument("--fps", type=int, default=10, help="Frames per second for dataset (default: 10)")
     parser.add_argument("--push_to_hub", action="store_true", help="Whether to push dataset to HuggingFace Hub")
     parser.add_argument("--frame_skip", type=int, default=2, help="Frame skip rate (default: 2)")
+    parser.add_argument("--action_type", type=str, default="joint_pos", choices=["joint_pos", "ee_rel"],
+                        help="Action type: joint_pos (absolute joint position) or ee_rel (EE relative pose delta + gripper)")
+    parser.add_argument("--reverse", action="store_true", help="Reverse the temporal order of demonstrations")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     default_repo_id = f"./datasets/lerobot/{timestamp}"
@@ -220,4 +256,6 @@ if __name__ == "__main__":
         push_to_hub=args.push_to_hub,
         frame_skip=args.frame_skip,
         root=default_repo_id,
+        action_type=args.action_type,
+        reverse=args.reverse,
     )
