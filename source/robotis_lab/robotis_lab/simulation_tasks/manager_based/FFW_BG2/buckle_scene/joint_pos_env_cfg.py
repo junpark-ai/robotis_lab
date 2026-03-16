@@ -33,6 +33,63 @@ from robotis_lab.simulation_tasks.manager_based.FFW_BG2.buckle_scene import mdp 
 
 from .buckle_scene_env_cfg import BuckleSceneEnvCfg
 
+DEFAULT_GRIPPER_CLOSED_POS = 0.61
+_ARM_MIRROR_SIGNS = (1.0, -1.0, -1.0, 1.0, -1.0, 1.0, -1.0)
+
+
+def _arm_joint_dict(side: str, values: tuple[float, ...]) -> dict[str, float]:
+    return {f"arm_{side}_joint{joint_idx}": value for joint_idx, value in enumerate(values, start=1)}
+
+
+def _mirror_right_arm_to_left(values: tuple[float, ...]) -> tuple[float, ...]:
+    return tuple(sign * value for sign, value in zip(_ARM_MIRROR_SIGNS, values, strict=True))
+
+
+def _make_init_pose(left_arm: tuple[float, ...], right_arm: tuple[float, ...]) -> dict[str, float]:
+    return {
+        "lift_joint": 0.0,
+        **_arm_joint_dict("l", left_arm),
+        "gripper_l_joint1": DEFAULT_GRIPPER_CLOSED_POS,
+        **_arm_joint_dict("r", right_arm),
+        "gripper_r_joint1": DEFAULT_GRIPPER_CLOSED_POS,
+        "head_joint1": 0.8,
+        "head_joint2": 0.0,
+    }
+
+
+_SYM_FLAT_0_RIGHT_ARM = (-0.5867, -0.7635, 1.1075, -1.1013, -1.0725, -0.5312, 1.2686)
+_SYM_UP_30_RIGHT_ARM = (-0.6325, -0.7137, 1.2575, -1.1521, -1.6740, -0.7189, 1.4798)
+_CURRENT_DEFAULT_RIGHT_ARM = (-1.1908, -0.7258, 1.1927, -1.8772, -1.0344, 0.6439, 0.6263)
+_CURRENT_DEFAULT_LEFT_ARM = (-0.6325, 0.7137, -1.2575, -1.1521, 1.6740, -0.7189, -1.4798)
+_DEG30_INSERTED_LEFT_ARM = (-0.6273, 0.7124, -1.2592, -1.1518, 1.6736, -0.7189, -1.4796)
+_DEG30_INSERTED_RIGHT_ARM = (-1.1892, -0.7551, 1.2172, -1.8898, -1.0371, 0.613, 0.6241)
+_DEG30_NOT_INSERTED_LEFT_ARM = (-0.6273, 0.7124, -1.2592, -1.1518, 1.6736, -0.7189, -1.4796)
+_DEG30_NOT_INSERTED_RIGHT_ARM = (-1.2215, -0.9796, 1.1166, -1.9488, -1.0686, 0.6155, 0.8231)
+_DEG0_INSERTED_RIGHT_ARM = (-0.6292, -0.6842, 1.1943, -1.1898, -0.9902, -0.4855, 1.0605)
+_DEG0_NOT_INSERTED_RIGHT_ARM = (-0.5961, -0.7354, 1.1299, -1.1328, -1.0359, -0.5155, 1.1938)
+
+INIT_POSE_OPTIONS = {
+    "current_default": _make_init_pose(_CURRENT_DEFAULT_LEFT_ARM, _CURRENT_DEFAULT_RIGHT_ARM),
+    "sym_flat_0": _make_init_pose(_mirror_right_arm_to_left(_SYM_FLAT_0_RIGHT_ARM), _SYM_FLAT_0_RIGHT_ARM),
+    "sym_up_30": _make_init_pose(_mirror_right_arm_to_left(_SYM_UP_30_RIGHT_ARM), _SYM_UP_30_RIGHT_ARM),
+    "deg30_inserted": _make_init_pose(_DEG30_INSERTED_LEFT_ARM, _DEG30_INSERTED_RIGHT_ARM),
+    "deg30_not_inserted": _make_init_pose(_DEG30_NOT_INSERTED_LEFT_ARM, _DEG30_NOT_INSERTED_RIGHT_ARM),
+    "deg0_inserted": _make_init_pose(_mirror_right_arm_to_left(_DEG0_INSERTED_RIGHT_ARM), _DEG0_INSERTED_RIGHT_ARM),
+    "deg0_not_inserted": _make_init_pose(
+        _mirror_right_arm_to_left(_DEG0_NOT_INSERTED_RIGHT_ARM), _DEG0_NOT_INSERTED_RIGHT_ARM
+    ),
+}
+
+# Available options:
+# - current_default
+# - sym_flat_0
+# - sym_up_30
+# - deg30_inserted
+# - deg30_not_inserted
+# - deg0_inserted
+# - deg0_not_inserted
+SELECTED_INIT_POSE = "deg30_not_inserted"
+
 
 @configclass
 class EventCfg:
@@ -40,61 +97,7 @@ class EventCfg:
         func=ffw_bg2_pick_place_events.set_default_joint_pose,
         mode="reset",
         params={
-            "joint_positions": {
-                # Copy/paste presets as needed.
-                #
-                # Symmetric flat-0 preset:
-                # "arm_l_joint1": -0.5867,
-                # "arm_l_joint2": 0.7635,
-                # "arm_l_joint3": -1.1075,
-                # "arm_l_joint4": -1.1013,
-                # "arm_l_joint5": 1.0725,
-                # "arm_l_joint6": -0.5312,
-                # "arm_l_joint7": -1.2686,
-                # "arm_r_joint1": -0.5867,
-                # "arm_r_joint2": -0.7635,
-                # "arm_r_joint3": 1.1075,
-                # "arm_r_joint4": -1.1013,
-                # "arm_r_joint5": -1.0725,
-                # "arm_r_joint6": -0.5312,
-                # "arm_r_joint7": 1.2686,
-                #
-                # Symmetric up-30 preset:
-                # "arm_l_joint1": -0.6325,
-                # "arm_l_joint2": 0.7137,
-                # "arm_l_joint3": -1.2575,
-                # "arm_l_joint4": -1.1521,
-                # "arm_l_joint5": 1.6740,
-                # "arm_l_joint6": -0.7189,
-                # "arm_l_joint7": -1.4798,
-                # "arm_r_joint1": -0.6325,
-                # "arm_r_joint2": -0.7137,
-                # "arm_r_joint3": 1.2575,
-                # "arm_r_joint4": -1.1521,
-                # "arm_r_joint5": -1.6740,
-                # "arm_r_joint6": -0.7189,
-                # "arm_r_joint7": 1.4798,
-                #
-                "lift_joint": 0.0,
-                "arm_l_joint1": -0.6325,
-                "arm_l_joint2": 0.7137,
-                "arm_l_joint3": -1.2575,
-                "arm_l_joint4": -1.1521,
-                "arm_l_joint5": 1.6740,
-                "arm_l_joint6": -0.7189,
-                "arm_l_joint7": -1.4798,
-                "gripper_l_joint1": 0.65,
-                "arm_r_joint1": -1.1908,
-                "arm_r_joint2": -0.7258,
-                "arm_r_joint3": 1.1927,
-                "arm_r_joint4": -1.8772,
-                "arm_r_joint5": -1.0344,
-                "arm_r_joint6": 0.6439,
-                "arm_r_joint7": 0.6263,
-                "gripper_r_joint1": 0.65,
-                "head_joint1": 0.8,
-                "head_joint2": 0.0,
-            },
+            "joint_positions": INIT_POSE_OPTIONS[SELECTED_INIT_POSE],
         },
     )
 
@@ -150,7 +153,7 @@ class BuckleSceneFFWBG2JointPosEnvCfg(BuckleSceneEnvCfg):
             asset_name="robot",
             joint_names=["gripper_r_joint1"],
             open_command_expr={"gripper_r_joint1": 0.0},
-            close_command_expr={"gripper_r_joint1": 0.65},
+            close_command_expr={"gripper_r_joint1": DEFAULT_GRIPPER_CLOSED_POS},
         )
         self.actions.gripper_action.class_type = buckle_mdp.DefaultClosedBinaryJointPositionAction
 

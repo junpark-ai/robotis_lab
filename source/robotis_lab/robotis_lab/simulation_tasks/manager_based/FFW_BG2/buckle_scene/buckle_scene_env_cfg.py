@@ -138,6 +138,9 @@ class BuckleSceneEnvCfg(ManagerBasedRLEnvCfg):
         self.decimation = 5
         self.episode_length_s = 60.0
 
+        self.viewer.eye = (1.8, 0.9, 1.7)
+        self.viewer.lookat = (0.45, 0.0, 1.0)
+
         self.sim.dt = 0.01
         self.sim.render_interval = 2
 
