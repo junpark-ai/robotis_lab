@@ -19,6 +19,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+import isaaclab.envs.mdp as base_mdp
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import FrameTransformerCfg
@@ -88,16 +89,39 @@ INIT_POSE_OPTIONS = {
 # - deg30_not_inserted
 # - deg0_inserted
 # - deg0_not_inserted
-SELECTED_INIT_POSE = "deg30_not_inserted"
+SELECTED_INIT_POSE = "deg0_inserted"
+INSERT_GRASP_RANDOM_AXIS = (0.0, 1.0, 0.0)
+INSERT_GRASP_RANDOM_RANGE_DEG = (-15.0, 15.0)
 
 
 @configclass
 class EventCfg:
+    reset_scene = EventTerm(func=base_mdp.reset_scene_to_default, mode="reset")
+
+    detach_buckles = EventTerm(
+        func=buckle_mdp.detach_buckle_fixed_joints,
+        mode="reset",
+    )
+
     init_ffw_bg2_pose = EventTerm(
         func=ffw_bg2_pick_place_events.set_default_joint_pose,
         mode="reset",
         params={
             "joint_positions": INIT_POSE_OPTIONS[SELECTED_INIT_POSE],
+        },
+    )
+
+    reset_buckles_to_nominal_grasp_pose = EventTerm(
+        func=buckle_mdp.reset_buckle_objects_to_nominal_grasp_pose,
+        mode="reset",
+    )
+
+    randomize_insert_grasp_pose = EventTerm(
+        func=buckle_mdp.randomize_buckle_grasp_pose,
+        mode="reset",
+        params={
+            "rotation_axis": INSERT_GRASP_RANDOM_AXIS,
+            "angle_range_deg": INSERT_GRASP_RANDOM_RANGE_DEG,
         },
     )
 

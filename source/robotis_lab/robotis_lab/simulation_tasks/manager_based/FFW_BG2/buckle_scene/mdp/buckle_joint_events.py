@@ -20,17 +20,15 @@ import torch
 
 import isaaclab.utils.math as math_utils
 from isaaclab.assets import Articulation, RigidObject
+from isaaclab.controllers.differential_ik import DifferentialIKController
+from isaaclab.controllers.differential_ik_cfg import DifferentialIKControllerCfg
+from isaaclab.managers import SceneEntityCfg
 
 
 # Fixed transform from arm_*_link7 to end_effector_*_link in ffw_bg2_follower.urdf.xacro.
 _EE_OFFSET_POS = torch.tensor([[-0.015, 0.0, -0.23]], dtype=torch.float32)
 _EE_OFFSET_QUAT = torch.tensor([[1.0, 0.0, 0.0, 0.0]], dtype=torch.float32)
 _IDENTITY_QUAT = torch.tensor([1.0, 0.0, 0.0, 0.0], dtype=torch.float32)
-# The buckle USD roots sit near the lower side of the geometry, so we attach a point
-# slightly above each root to the end-effector frame instead of the raw root prim.
-_HOUSING_ATTACH_OFFSET_POS = torch.tensor([[0.0, 0.0, 0.0]], dtype=torch.float32)
-_INSERT_ATTACH_OFFSET_POS = torch.tensor([[0.0, 0.0, 0.0]], dtype=torch.float32)
-_ATTACH_OFFSET_QUAT = torch.tensor([[1.0, 0.0, 0.0, 0.0]], dtype=torch.float32)
 
 
 def _resolve_env_ids(env, env_ids) -> torch.Tensor:
@@ -97,6 +95,167 @@ def _create_fixed_joint(
     return joint
 
 
+def _set_joint_local_pose(stage, joint_path: str, local_pos0, local_rot0, local_pos1, local_rot1) -> None:
+    joint_prim = stage.GetPrimAtPath(joint_path)
+    if not joint_prim.IsValid():
+        return
+
+    joint_prim.GetAttribute("physics:localPos0").Set(local_pos0)
+    joint_prim.GetAttribute("physics:localRot0").Set(local_rot0)
+    joint_prim.GetAttribute("physics:localPos1").Set(local_pos1)
+    joint_prim.GetAttribute("physics:localRot1").Set(local_rot1)
+
+
+def detach_buckle_fixed_joints(env, env_ids):
+    import omni.usd
+
+    env_ids = _resolve_env_ids(env, env_ids)
+    if env_ids.numel() == 0:
+        return
+
+    _ensure_joint_cache(env)
+    stage = omni.usd.get_context().get_stage()
+
+    for env_id in env_ids.tolist():
+        left_joint_path = f"/World/envs/env_{env_id}/LeftHousingFixedJoint"
+        right_joint_path = f"/World/envs/env_{env_id}/RightInsertFixedJoint"
+
+        if stage.GetPrimAtPath(left_joint_path).IsValid():
+            stage.RemovePrim(left_joint_path)
+        if stage.GetPrimAtPath(right_joint_path).IsValid():
+            stage.RemovePrim(right_joint_path)
+
+        env._buckle_fixed_joints_created[env_id] = False
+
+
+def reset_buckle_objects_to_nominal_grasp_pose(env, env_ids):
+    env_ids = _resolve_env_ids(env, env_ids)
+    if env_ids.numel() == 0:
+        return
+
+    robot: Articulation = env.scene["robot"]
+    housing: RigidObject = env.scene["housing"]
+    insert: RigidObject = env.scene["insert"]
+
+    left_body_id = robot.find_bodies("arm_l_link7")[0][0]
+    right_body_id = robot.find_bodies("arm_r_link7")[0][0]
+
+    ee_offset_pos = _EE_OFFSET_POS.to(device=env.device).repeat(len(env_ids), 1)
+    ee_offset_quat = _EE_OFFSET_QUAT.to(device=env.device).repeat(len(env_ids), 1)
+    zero_velocity = torch.zeros((len(env_ids), 6), device=env.device)
+
+    arm_l_pos = robot.data.body_state_w[env_ids, left_body_id, :3]
+    arm_l_quat = robot.data.body_state_w[env_ids, left_body_id, 3:7]
+    arm_r_pos = robot.data.body_state_w[env_ids, right_body_id, :3]
+    arm_r_quat = robot.data.body_state_w[env_ids, right_body_id, 3:7]
+
+    ee_l_pos, ee_l_quat = math_utils.combine_frame_transforms(arm_l_pos, arm_l_quat, ee_offset_pos, ee_offset_quat)
+    ee_r_pos, ee_r_quat = math_utils.combine_frame_transforms(arm_r_pos, arm_r_quat, ee_offset_pos, ee_offset_quat)
+
+    housing.write_root_pose_to_sim(torch.cat([ee_l_pos, ee_l_quat], dim=-1), env_ids=env_ids)
+    housing.write_root_velocity_to_sim(zero_velocity, env_ids=env_ids)
+    insert.write_root_pose_to_sim(torch.cat([ee_r_pos, ee_r_quat], dim=-1), env_ids=env_ids)
+    insert.write_root_velocity_to_sim(zero_velocity, env_ids=env_ids)
+
+
+def randomize_buckle_grasp_pose(
+    env,
+    env_ids,
+    rotation_axis: tuple[float, float, float],
+    angle_range_deg: float | tuple[float, float],
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    joint_names: tuple[str, ...] = (
+        "arm_r_joint1",
+        "arm_r_joint2",
+        "arm_r_joint3",
+        "arm_r_joint4",
+        "arm_r_joint5",
+        "arm_r_joint6",
+        "arm_r_joint7",
+    ),
+    body_name: str = "arm_r_link7",
+    num_iterations: int = 16,
+):
+    env_ids = _resolve_env_ids(env, env_ids)
+    if env_ids.numel() == 0:
+        return
+
+    asset: Articulation = env.scene[asset_cfg.name]
+    joint_ids, _ = asset.find_joints(list(joint_names))
+    if len(joint_ids) != len(joint_names):
+        raise ValueError(f"Expected {len(joint_names)} joint matches for right arm, found {len(joint_ids)}.")
+    body_ids, body_names = asset.find_bodies(body_name)
+    if len(body_ids) != 1:
+        raise ValueError(f"Expected one match for {body_name}, found {len(body_ids)}: {body_names}.")
+
+    ee_body_idx = body_ids[0]
+    if asset.is_fixed_base:
+        jacobi_ee_body_idx = ee_body_idx - 1
+        jacobi_joint_idx = joint_ids
+    else:
+        jacobi_ee_body_idx = ee_body_idx
+        jacobi_joint_idx = [joint_id + 6 for joint_id in joint_ids]
+
+    if isinstance(angle_range_deg, (int, float)):
+        magnitude = abs(float(angle_range_deg))
+        min_deg, max_deg = -magnitude, magnitude
+    else:
+        if len(angle_range_deg) != 2:
+            raise ValueError("angle_range_deg must be a float or a (min_deg, max_deg) tuple.")
+        min_deg, max_deg = float(angle_range_deg[0]), float(angle_range_deg[1])
+
+    axis = torch.tensor(rotation_axis, device=env.device, dtype=torch.float32)
+    axis_norm = torch.linalg.vector_norm(axis)
+    if axis_norm <= 0:
+        raise ValueError("rotation_axis must be non-zero.")
+    axis = (axis / axis_norm).unsqueeze(0).repeat(len(env_ids), 1)
+
+    delta_angle = torch.empty(len(env_ids), device=env.device, dtype=torch.float32).uniform_(
+        torch.deg2rad(torch.tensor(min_deg, device=env.device, dtype=torch.float32)),
+        torch.deg2rad(torch.tensor(max_deg, device=env.device, dtype=torch.float32)),
+    )
+    delta_quat = math_utils.quat_from_angle_axis(delta_angle, axis)
+
+    controller = DifferentialIKController(
+        DifferentialIKControllerCfg(command_type="pose", use_relative_mode=False, ik_method="dls"),
+        num_envs=len(env_ids),
+        device=env.device,
+    )
+
+    offset_pos = _EE_OFFSET_POS.to(device=env.device).repeat(len(env_ids), 1)
+    offset_rot = _EE_OFFSET_QUAT.to(device=env.device).repeat(len(env_ids), 1)
+    joint_vel = asset.data.default_joint_vel[env_ids][:, joint_ids].clone()
+    root_pos_w = asset.data.root_pos_w[env_ids]
+    root_quat_w = asset.data.root_quat_w[env_ids]
+    insert: RigidObject = env.scene["insert"]
+    target_ee_pos_w = insert.data.root_pos_w[env_ids]
+    target_ee_quat_w = math_utils.quat_mul(insert.data.root_quat_w[env_ids], delta_quat)
+    target_ee_pos_b, target_ee_quat_b = math_utils.subtract_frame_transforms(
+        root_pos_w, root_quat_w, target_ee_pos_w, target_ee_quat_w
+    )
+    controller.set_command(torch.cat([target_ee_pos_b, target_ee_quat_b], dim=-1))
+
+    for _ in range(num_iterations):
+        ee_body_pos_w = asset.data.body_pos_w[env_ids, ee_body_idx]
+        ee_body_quat_w = asset.data.body_quat_w[env_ids, ee_body_idx]
+        ee_pos_w, ee_quat_w = math_utils.combine_frame_transforms(ee_body_pos_w, ee_body_quat_w, offset_pos, offset_rot)
+        ee_pos_b, ee_quat_b = math_utils.subtract_frame_transforms(root_pos_w, root_quat_w, ee_pos_w, ee_quat_w)
+
+        jacobian = asset.root_physx_view.get_jacobians()[env_ids][:, jacobi_ee_body_idx, :, jacobi_joint_idx]
+        jacobian[:, 0:3, :] += torch.bmm(-math_utils.skew_symmetric_matrix(offset_pos), jacobian[:, 3:, :])
+        jacobian[:, 3:, :] = torch.bmm(math_utils.matrix_from_quat(offset_rot), jacobian[:, 3:, :])
+
+        current_joint_pos = asset.data.joint_pos[env_ids][:, joint_ids]
+        desired_joint_pos = controller.compute(ee_pos_b, ee_quat_b, jacobian, current_joint_pos)
+
+        joint_pos_limits = asset.data.soft_joint_pos_limits[env_ids][:, joint_ids, :]
+        desired_joint_pos = desired_joint_pos.clamp_(joint_pos_limits[..., 0], joint_pos_limits[..., 1])
+
+        asset.set_joint_position_target(desired_joint_pos, joint_ids=joint_ids, env_ids=env_ids)
+        asset.set_joint_velocity_target(joint_vel, joint_ids=joint_ids, env_ids=env_ids)
+        asset.write_joint_state_to_sim(desired_joint_pos, joint_vel, joint_ids=joint_ids, env_ids=env_ids)
+
+
 def attach_buckle_objects_with_fixed_joints(env, env_ids):
     import omni.log
     import omni.usd
@@ -117,9 +276,6 @@ def attach_buckle_objects_with_fixed_joints(env, env_ids):
 
     ee_offset_pos = _EE_OFFSET_POS.to(device=env.device)
     ee_offset_quat = _EE_OFFSET_QUAT.to(device=env.device)
-    housing_attach_offset_pos = _HOUSING_ATTACH_OFFSET_POS.to(device=env.device)
-    insert_attach_offset_pos = _INSERT_ATTACH_OFFSET_POS.to(device=env.device)
-    attach_offset_quat = _ATTACH_OFFSET_QUAT.to(device=env.device)
 
     for env_id in env_ids.tolist():
         left_joint_path = f"/World/envs/env_{env_id}/LeftHousingFixedJoint"
@@ -139,33 +295,21 @@ def attach_buckle_objects_with_fixed_joints(env, env_ids):
 
         ee_l_pos, ee_l_quat = math_utils.combine_frame_transforms(arm_l_pos, arm_l_quat, ee_offset_pos, ee_offset_quat)
         ee_r_pos, ee_r_quat = math_utils.combine_frame_transforms(arm_r_pos, arm_r_quat, ee_offset_pos, ee_offset_quat)
+        housing_root_pos = housing.data.root_pos_w[env_id : env_id + 1]
+        housing_root_quat = housing.data.root_quat_w[env_id : env_id + 1]
+        insert_root_pos = insert.data.root_pos_w[env_id : env_id + 1]
+        insert_root_quat = insert.data.root_quat_w[env_id : env_id + 1]
 
-        attach_to_root_quat = math_utils.quat_inv(attach_offset_quat)
-        housing_attach_to_root_pos = math_utils.quat_apply(attach_to_root_quat, -housing_attach_offset_pos)
-        insert_attach_to_root_pos = math_utils.quat_apply(attach_to_root_quat, -insert_attach_offset_pos)
-
-        desired_housing_root_pos, desired_housing_root_quat = math_utils.combine_frame_transforms(
-            ee_l_pos,
-            ee_l_quat,
-            housing_attach_to_root_pos,
-            attach_to_root_quat,
+        housing_local_pos1, housing_local_rot1 = math_utils.subtract_frame_transforms(
+            housing_root_pos, housing_root_quat, ee_l_pos, ee_l_quat
         )
-        desired_insert_root_pos, desired_insert_root_quat = math_utils.combine_frame_transforms(
-            ee_r_pos,
-            ee_r_quat,
-            insert_attach_to_root_pos,
-            attach_to_root_quat,
+        insert_local_pos1, insert_local_rot1 = math_utils.subtract_frame_transforms(
+            insert_root_pos, insert_root_quat, ee_r_pos, ee_r_quat
         )
 
         target_env_ids = torch.tensor([env_id], device=env.device, dtype=torch.long)
         zero_velocity = torch.zeros((1, 6), device=env.device)
-        housing.write_root_pose_to_sim(
-            torch.cat([desired_housing_root_pos, desired_housing_root_quat], dim=-1), env_ids=target_env_ids
-        )
         housing.write_root_velocity_to_sim(zero_velocity, env_ids=target_env_ids)
-        insert.write_root_pose_to_sim(
-            torch.cat([desired_insert_root_pos, desired_insert_root_quat], dim=-1), env_ids=target_env_ids
-        )
         insert.write_root_velocity_to_sim(zero_velocity, env_ids=target_env_ids)
 
         left_actor0_path = ee_l_path if ee_l_path is not None else arm_l_link7_path
@@ -193,9 +337,17 @@ def attach_buckle_objects_with_fixed_joints(env, env_ids):
                 actor1_path=housing.root_physx_view.prim_paths[env_id],
                 local_pos0=left_local_pos0,
                 local_rot0=left_local_rot0,
-                local_pos1=_vec3_to_gf(housing_attach_offset_pos[0]),
-                local_rot1=_quat_to_gf(attach_offset_quat[0]),
+                local_pos1=_vec3_to_gf(housing_local_pos1[0]),
+                local_rot1=_quat_to_gf(housing_local_rot1[0]),
             )
+        _set_joint_local_pose(
+            stage=stage,
+            joint_path=left_joint_path,
+            local_pos0=left_local_pos0,
+            local_rot0=left_local_rot0,
+            local_pos1=_vec3_to_gf(housing_local_pos1[0]),
+            local_rot1=_quat_to_gf(housing_local_rot1[0]),
+        )
         if not right_joint_exists:
             _create_fixed_joint(
                 stage=stage,
@@ -204,9 +356,17 @@ def attach_buckle_objects_with_fixed_joints(env, env_ids):
                 actor1_path=insert.root_physx_view.prim_paths[env_id],
                 local_pos0=right_local_pos0,
                 local_rot0=right_local_rot0,
-                local_pos1=_vec3_to_gf(insert_attach_offset_pos[0]),
-                local_rot1=_quat_to_gf(attach_offset_quat[0]),
+                local_pos1=_vec3_to_gf(insert_local_pos1[0]),
+                local_rot1=_quat_to_gf(insert_local_rot1[0]),
             )
+        _set_joint_local_pose(
+            stage=stage,
+            joint_path=right_joint_path,
+            local_pos0=right_local_pos0,
+            local_rot0=right_local_rot0,
+            local_pos1=_vec3_to_gf(insert_local_pos1[0]),
+            local_rot1=_quat_to_gf(insert_local_rot1[0]),
+        )
 
         env._buckle_fixed_joints_created[env_id] = stage.GetPrimAtPath(left_joint_path).IsValid() and stage.GetPrimAtPath(
             right_joint_path
