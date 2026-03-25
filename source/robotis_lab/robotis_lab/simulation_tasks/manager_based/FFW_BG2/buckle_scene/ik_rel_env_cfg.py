@@ -42,7 +42,8 @@ class BuckleSceneFFWBG2EnvCfg(joint_pos_env_cfg.BuckleSceneFFWBG2JointPosEnvCfg)
             joint_names=["arm_r_joint[1-7]"],
             body_name="arm_r_link7",
             controller=DifferentialIKControllerCfg(command_type="pose", use_relative_mode=True, ik_method="dls"),
-            scale=0.1,
+            scale=0.001,
             body_offset=DifferentialInverseKinematicsActionCfg.OffsetCfg(pos=[0.0, 0.0, 0.0]),
             task_frame_rel_path="housing",
+            lock_orientation_to_reset=False,
         )

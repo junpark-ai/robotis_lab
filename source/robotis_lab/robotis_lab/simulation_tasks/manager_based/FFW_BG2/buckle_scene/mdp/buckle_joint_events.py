@@ -42,6 +42,8 @@ def _resolve_env_ids(env, env_ids) -> torch.Tensor:
 def _ensure_joint_cache(env):
     if not hasattr(env, "_buckle_fixed_joints_created"):
         env._buckle_fixed_joints_created = torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
+    if not hasattr(env, "_buckle_collision_filters_created"):
+        env._buckle_collision_filters_created = torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
 
 
 def _quat_to_gf(quat_tensor):
@@ -104,6 +106,13 @@ def _set_joint_local_pose(stage, joint_path: str, local_pos0, local_rot0, local_
     joint_prim.GetAttribute("physics:localRot0").Set(local_rot0)
     joint_prim.GetAttribute("physics:localPos1").Set(local_pos1)
     joint_prim.GetAttribute("physics:localRot1").Set(local_rot1)
+
+
+def _filter_robot_buckle_collisions(stage, robot_prim_path: str, buckle_prim_path: str) -> None:
+    """Masks collisions between the robot articulation and a buckle rigid object."""
+    from omni.physx.scripts import utils as physx_utils
+
+    physx_utils.addPairFilter(stage, [robot_prim_path, buckle_prim_path])
 
 
 def detach_buckle_fixed_joints(env, env_ids):
@@ -282,6 +291,14 @@ def attach_buckle_objects_with_fixed_joints(env, env_ids):
         right_joint_path = f"/World/envs/env_{env_id}/RightInsertFixedJoint"
         left_joint_exists = stage.GetPrimAtPath(left_joint_path).IsValid()
         right_joint_exists = stage.GetPrimAtPath(right_joint_path).IsValid()
+        robot_root_path = robot.root_physx_view.prim_paths[env_id]
+        housing_root_path = housing.root_physx_view.prim_paths[env_id]
+        insert_root_path = insert.root_physx_view.prim_paths[env_id]
+
+        if not bool(env._buckle_collision_filters_created[env_id].item()):
+            _filter_robot_buckle_collisions(stage, robot_root_path, housing_root_path)
+            _filter_robot_buckle_collisions(stage, robot_root_path, insert_root_path)
+            env._buckle_collision_filters_created[env_id] = True
 
         arm_l_link7_path, arm_r_link7_path, ee_l_path, ee_r_path = _get_robot_link_paths(stage, env_id)
         if arm_l_link7_path is None or arm_r_link7_path is None:
@@ -334,7 +351,7 @@ def attach_buckle_objects_with_fixed_joints(env, env_ids):
                 stage=stage,
                 joint_path=left_joint_path,
                 actor0_path=left_actor0_path,
-                actor1_path=housing.root_physx_view.prim_paths[env_id],
+                actor1_path=housing_root_path,
                 local_pos0=left_local_pos0,
                 local_rot0=left_local_rot0,
                 local_pos1=_vec3_to_gf(housing_local_pos1[0]),
@@ -353,7 +370,7 @@ def attach_buckle_objects_with_fixed_joints(env, env_ids):
                 stage=stage,
                 joint_path=right_joint_path,
                 actor0_path=right_actor0_path,
-                actor1_path=insert.root_physx_view.prim_paths[env_id],
+                actor1_path=insert_root_path,
                 local_pos0=right_local_pos0,
                 local_rot0=right_local_rot0,
                 local_pos1=_vec3_to_gf(insert_local_pos1[0]),

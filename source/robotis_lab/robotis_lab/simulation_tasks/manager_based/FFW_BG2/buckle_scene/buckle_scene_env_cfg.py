@@ -63,7 +63,7 @@ class BuckleTableSceneCfg(InteractiveSceneCfg):
         spawn=SEATBELT_BUCKLE_HOUSING_CFG.spawn.replace(
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 kinematic_enabled=False,
-                disable_gravity=False,
+                disable_gravity=True,
                 linear_damping=1.0,
                 angular_damping=1.0,
                 max_depenetration_velocity=5.0,
@@ -135,11 +135,11 @@ class BuckleSceneEnvCfg(ManagerBasedRLEnvCfg):
     curriculum = None
 
     def __post_init__(self):
-        self.decimation = 5
+        self.decimation = 1
         self.episode_length_s = 60.0
 
-        self.viewer.eye = (1.8, 0.9, 1.7)
-        self.viewer.lookat = (0.45, 0.0, 1.0)
+        self.viewer.eye = (0.55, 0.0, 1.2)
+        self.viewer.lookat = (0.45, 0.0, 1.2)
 
         self.sim.dt = 0.01
         self.sim.render_interval = 2
